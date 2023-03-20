@@ -198,7 +198,7 @@ impl Inscribe {
           &joined_psbt.unwrap().to_string(),
           None,
           None,
-          // Some(SigHashType::f&rom(
+          // Some(SigHashType::from(
             // bitcoin::blockdata::transaction::EcdsaSighashType::AllPlusAnyoneCanPay,
           // )), // TODO: use SchnorrSighashType
           None,
@@ -208,11 +208,12 @@ impl Inscribe {
           // return Err(anyhow!("Bitcoin Core failed to sign psbt"));
         // }
         
-        let updated_psbt = PartiallySignedTransaction::from_str(&result.psbt).unwrap();
+        let finalize_result = client.finalize_psbt(&result.psbt, None)?;
+        println!("{:?}", finalize_result);
 
-        dbg!(&updated_psbt);
+        let finalized_psbt = PartiallySignedTransaction::from_str(&finalize_result.psbt.unwrap()).unwrap();
 
-        updated_psbt.extract_tx()
+        finalized_psbt.extract_tx()
       } else {
         reveal_tx
       };
