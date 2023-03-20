@@ -1,5 +1,3 @@
-use bitcoin::{consensus::serialize, SchnorrSig};
-
 use {
   super::*,
   crate::wallet::Wallet,
@@ -14,7 +12,7 @@ use {
     util::psbt::{self, Input, PartiallySignedTransaction, PsbtSighashType},
     util::sighash::{Prevouts, SighashCache},
     util::taproot::{ControlBlock, LeafVersion, TapLeafHash, TaprootBuilder},
-    PackedLockTime, SchnorrSighashType, Witness,
+    PackedLockTime, SchnorrSig, SchnorrSighashType, Witness,
   },
   bitcoincore_rpc::bitcoincore_rpc_json::{ImportDescriptors, SigHashType, Timestamp},
   bitcoincore_rpc::Client,
@@ -164,7 +162,7 @@ impl Inscribe {
           )), // TODO: use SchnorrSighashType
           None,
         )?;
-        
+
         if !result.complete {
           return Err(anyhow!("Bitcoin Core failed to sign psbt"));
         }
@@ -174,15 +172,17 @@ impl Inscribe {
         dbg!(&updated_psbt);
 
         updated_psbt.extract_tx()
-      } else { reveal_tx };
+      } else {
+        reveal_tx
+      };
 
       let commit = client
-          .send_raw_transaction(&signed_raw_commit_tx)
-          .context("Failed to send commit transaction")?;
+        .send_raw_transaction(&signed_raw_commit_tx)
+        .context("Failed to send commit transaction")?;
 
-      let reveal =  client
-          .send_raw_transaction(&reveal_tx)
-          .context("Failed to send reveal transaction")?;
+      let reveal = client
+        .send_raw_transaction(&reveal_tx)
+        .context("Failed to send reveal transaction")?;
 
       let inscription = InscriptionId {
         txid: reveal,
