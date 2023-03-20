@@ -197,9 +197,10 @@ impl Inscribe {
         let result = &client.wallet_process_psbt(
           &joined_psbt.unwrap().to_string(),
           None,
-          Some(SigHashType::from(
-            bitcoin::blockdata::transaction::EcdsaSighashType::AllPlusAnyoneCanPay,
-          )), // TODO: use SchnorrSighashType
+          None,
+          // Some(SigHashType::f&rom(
+            // bitcoin::blockdata::transaction::EcdsaSighashType::AllPlusAnyoneCanPay,
+          // )), // TODO: use SchnorrSighashType
           None,
         )?;
 
