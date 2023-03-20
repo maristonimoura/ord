@@ -193,7 +193,7 @@ impl Inscribe {
         .hex;
 
       let reveal_tx = if self.parent.is_some() {
-        println!("{}", reveal_psbt.to_string());
+        println!("{}", joined_psbt.clone().unwrap().to_string());
         let result = &client.wallet_process_psbt(
           &joined_psbt.unwrap().to_string(),
           None,
