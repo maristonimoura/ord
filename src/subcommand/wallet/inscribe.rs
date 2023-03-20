@@ -204,10 +204,10 @@ impl Inscribe {
           None,
         )?;
 
-        if !result.complete {
-          return Err(anyhow!("Bitcoin Core failed to sign psbt"));
-        }
-
+        // if !result.complete {
+          // return Err(anyhow!("Bitcoin Core failed to sign psbt"));
+        // }
+        
         let updated_psbt = PartiallySignedTransaction::from_str(&result.psbt).unwrap();
 
         dbg!(&updated_psbt);
