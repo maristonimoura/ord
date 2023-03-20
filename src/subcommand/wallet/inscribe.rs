@@ -16,6 +16,7 @@ use {
   },
   bitcoincore_rpc::bitcoincore_rpc_json::{
     CreateRawTransactionInput, ImportDescriptors, SigHashType, Timestamp,
+    WalletCreateFundedPsbtOptions,
   },
   bitcoincore_rpc::Client,
   std::collections::BTreeSet,
@@ -73,7 +74,7 @@ impl Inscribe {
 
     let inscriptions = index.get_inscriptions(None)?;
 
-    let (parent, commit_input_offset) = if let Some(parent_id) = self.parent {
+    let (parent_psbt, commit_input_offset) = if let Some(parent_id) = self.parent {
       if let Some(satpoint) = index.get_inscription_satpoint_by_id(parent_id)? {
         if !utxos.contains_key(&satpoint.outpoint) {
           return Err(anyhow!(format!(
@@ -101,9 +102,14 @@ impl Inscribe {
         ))
         .collect::<std::collections::HashMap<String, Amount>>();
 
+        let options = WalletCreateFundedPsbtOptions {
+          fee_rate: Some(Amount::ZERO),
+          ..Default::default()
+        };
+
         let parent_psbt = PartiallySignedTransaction::from_str(
           &client
-            .wallet_create_funded_psbt(&[parent_input], &outputs, None, None, None)?
+            .wallet_create_funded_psbt(&[parent_input], &outputs, None, Some(options), None)?
             .psbt,
         )
         .unwrap();
@@ -156,6 +162,17 @@ impl Inscribe {
     let fees =
       Self::calculate_fee(&unsigned_commit_tx, &utxos) + Self::calculate_fee(&reveal_tx, &utxos);
 
+    let joined_psbt = if let Some(parent_psbt) = parent_psbt {
+      Some(
+        PartiallySignedTransaction::from_str(
+          &client.join_psbt(&[parent_psbt.to_string(), reveal_psbt.to_string()])?,
+        )
+        .expect("should get joined psbt"),
+      )
+    } else {
+      None
+    };
+
     if self.dry_run {
       print_json(Output {
         commit: unsigned_commit_tx.txid(),
@@ -176,7 +193,7 @@ impl Inscribe {
       let reveal_tx = if self.parent.is_some() {
         println!("{}", reveal_psbt.to_string());
         let result = &client.wallet_process_psbt(
-          &reveal_psbt.to_string(),
+          &joined_psbt.unwrap().to_string(),
           None,
           Some(SigHashType::from(
             bitcoin::blockdata::transaction::EcdsaSighashType::AllPlusAnyoneCanPay,
@@ -297,32 +314,31 @@ impl Inscribe {
 
     let commit_tx_address = Address::p2tr_tweaked(taproot_spend_info.output_key(), network);
 
-    let (mut inputs, mut outputs, commit_input_offset) =
-      if let Some(psbt) = parent_psbt.clone() {
-        (
-          vec![satpoint.outpoint, OutPoint::null()],
-          vec![
-            TxOut {
-              script_pubkey: psbt.unsigned_tx.clone().output[0].script_pubkey.clone(),
-              value: psbt.unsigned_tx.output[0].value,
-            },
-            TxOut {
-              script_pubkey: destination.script_pubkey(),
-              value: 0,
-            },
-          ],
-          1,
-        )
-      } else {
-        (
-          vec![OutPoint::null()],
-          vec![TxOut {
+    let (mut inputs, mut outputs, commit_input_offset) = if let Some(psbt) = parent_psbt.clone() {
+      (
+        vec![satpoint.outpoint, OutPoint::null()],
+        vec![
+          TxOut {
+            script_pubkey: psbt.unsigned_tx.clone().output[0].script_pubkey.clone(),
+            value: psbt.unsigned_tx.output[0].value,
+          },
+          TxOut {
             script_pubkey: destination.script_pubkey(),
             value: 0,
-          }],
-          0,
-        )
-      };
+          },
+        ],
+        1,
+      )
+    } else {
+      (
+        vec![OutPoint::null()],
+        vec![TxOut {
+          script_pubkey: destination.script_pubkey(),
+          value: 0,
+        }],
+        0,
+      )
+    };
 
     let (_, reveal_fee) = Self::build_reveal_transaction(
       &control_block,
