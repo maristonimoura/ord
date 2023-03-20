@@ -97,7 +97,9 @@ impl Inscribe {
         };
 
         let outputs = std::iter::once((
-          output.script_pubkey.to_string(),
+          Address::from_script(&output.script_pubkey, options.chain().network())
+            .unwrap()
+            .to_string(),
           Amount::from_sat(output.value),
         ))
         .collect::<std::collections::HashMap<String, Amount>>();
