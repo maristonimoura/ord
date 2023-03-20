@@ -14,7 +14,9 @@ use {
     util::taproot::{ControlBlock, LeafVersion, TapLeafHash, TaprootBuilder},
     PackedLockTime, SchnorrSig, SchnorrSighashType, Witness,
   },
-  bitcoincore_rpc::bitcoincore_rpc_json::{ImportDescriptors, SigHashType, Timestamp},
+  bitcoincore_rpc::bitcoincore_rpc_json::{
+    CreateRawTransactionInput, ImportDescriptors, SigHashType, Timestamp,
+  },
   bitcoincore_rpc::Client,
   std::collections::BTreeSet,
 };
@@ -87,7 +89,26 @@ impl Inscribe {
           .nth(satpoint.outpoint.vout.try_into().unwrap())
           .expect("current transaction output");
 
-        (Some((satpoint, output)), 1)
+        let parent_input = CreateRawTransactionInput {
+          txid: satpoint.outpoint.txid,
+          vout: satpoint.outpoint.vout,
+          sequence: None,
+        };
+
+        let outputs = std::iter::once((
+          output.script_pubkey.to_string(),
+          Amount::from_sat(output.value),
+        ))
+        .collect::<std::collections::HashMap<String, Amount>>();
+
+        let parent_psbt = PartiallySignedTransaction::from_str(
+          &client
+            .wallet_create_funded_psbt(&[parent_input], &outputs, None, None, None)?
+            .psbt,
+        )
+        .unwrap();
+
+        (Some(parent_psbt), 0)
       } else {
         return Err(anyhow!(format!(
           "specified parent {parent_id} does not exist"
@@ -109,7 +130,7 @@ impl Inscribe {
     let (unsigned_commit_tx, reveal_psbt, recovery_key_pair) =
       Inscribe::create_inscription_transactions(
         self.satpoint,
-        parent,
+        None,
         inscription,
         inscriptions,
         options.chain().network(),
@@ -212,7 +233,7 @@ impl Inscribe {
 
   fn create_inscription_transactions(
     satpoint: Option<SatPoint>,
-    parent: Option<(SatPoint, TxOut)>,
+    parent_psbt: Option<PartiallySignedTransaction>,
     inscription: Inscription,
     inscriptions: BTreeMap<SatPoint, InscriptionId>,
     network: Network,
@@ -277,13 +298,13 @@ impl Inscribe {
     let commit_tx_address = Address::p2tr_tweaked(taproot_spend_info.output_key(), network);
 
     let (mut inputs, mut outputs, commit_input_offset) =
-      if let Some((satpoint, output)) = parent.clone() {
+      if let Some(psbt) = parent_psbt.clone() {
         (
           vec![satpoint.outpoint, OutPoint::null()],
           vec![
             TxOut {
-              script_pubkey: output.script_pubkey,
-              value: output.value,
+              script_pubkey: psbt.unsigned_tx.clone().output[0].script_pubkey.clone(),
+              value: psbt.unsigned_tx.output[0].value,
             },
             TxOut {
               script_pubkey: destination.script_pubkey(),
@@ -364,7 +385,7 @@ impl Inscribe {
     // NB. This binding is to avoid borrow-checker problems
     let prevouts_all_inputs = &[output];
 
-    let (prevouts, hash_ty, mut reveal_psbt) = if parent.is_some() {
+    let (prevouts, hash_ty, mut reveal_psbt) = if parent_psbt.is_some() {
       (
         Prevouts::One(commit_input_offset, output),
         SchnorrSighashType::AllPlusAnyoneCanPay,
