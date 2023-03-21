@@ -9,7 +9,9 @@ use {
       self, constants::SCHNORR_SIGNATURE_SIZE, rand, schnorr::Signature, Secp256k1, XOnlyPublicKey,
     },
     util::key::PrivateKey,
-    util::psbt::{self, Input, PartiallySignedTransaction, PsbtSighashType},
+    util::psbt::{
+      self, serialize::Deserialize, Input, PartiallySignedTransaction, PsbtSighashType,
+    },
     util::sighash::{Prevouts, SighashCache},
     util::taproot::{ControlBlock, LeafVersion, TapLeafHash, TaprootBuilder},
     PackedLockTime, SchnorrSig, SchnorrSighashType, Witness,
@@ -109,12 +111,9 @@ impl Inscribe {
           ..Default::default()
         };
 
-        let parent_psbt = PartiallySignedTransaction::from_str(
-          &client
-            .wallet_create_funded_psbt(&[parent_input], &outputs, None, Some(options), None)?
-            .psbt,
-        )
-        .unwrap();
+        let parent_psbt = client
+          .wallet_create_funded_psbt(&[parent_input], &outputs, None, Some(options), None)?
+          .psbt;
 
         (Some(parent_psbt), 0)
       } else {
@@ -165,12 +164,10 @@ impl Inscribe {
       Self::calculate_fee(&unsigned_commit_tx, &utxos) + Self::calculate_fee(&reveal_tx, &utxos);
 
     let joined_psbt = if let Some(parent_psbt) = parent_psbt {
-      Some(
-        PartiallySignedTransaction::from_str(
-          &client.join_psbt(&[parent_psbt.to_string(), reveal_psbt.to_string()])?,
-        )
-        .expect("should get joined psbt"),
-      )
+      dbg!(Some(client.join_psbt(&[
+        parent_psbt.to_string(),
+        reveal_psbt.to_string()
+      ])?))
     } else {
       None
     };
@@ -192,28 +189,29 @@ impl Inscribe {
         .sign_raw_transaction_with_wallet(&unsigned_commit_tx, None, None)?
         .hex;
 
-      let reveal_tx = if self.parent.is_some() {
-        println!("{}", joined_psbt.clone().unwrap().to_string());
+      let reveal_tx = if let Some(joined_psbt) = joined_psbt {
+        println!("{}", joined_psbt.clone());
         let result = &client.wallet_process_psbt(
-          &joined_psbt.unwrap().to_string(),
+          &joined_psbt,
           None,
           None,
           // Some(SigHashType::from(
-            // bitcoin::blockdata::transaction::EcdsaSighashType::AllPlusAnyoneCanPay,
+          // bitcoin::blockdata::transaction::EcdsaSighashType::AllPlusAnyoneCanPay,
           // )), // TODO: use SchnorrSighashType
           None,
         )?;
 
         // if !result.complete {
-          // return Err(anyhow!("Bitcoin Core failed to sign psbt"));
+        // return Err(anyhow!("Bitcoin Core failed to sign psbt"));
         // }
-        
+
         let finalize_result = client.finalize_psbt(&result.psbt, None)?;
         println!("{:?}", finalize_result);
 
-        let finalized_psbt = PartiallySignedTransaction::from_str(&finalize_result.psbt.unwrap()).unwrap();
+        let finalized_hex_tx = finalize_result.hex.unwrap();
+        dbg!(&finalized_hex_tx);
 
-        finalized_psbt.extract_tx()
+        Transaction::deserialize(finalized_hex_tx.as_slice()).unwrap()
       } else {
         reveal_tx
       };
@@ -228,7 +226,7 @@ impl Inscribe {
 
       let inscription = InscriptionId {
         txid: reveal,
-        index: commit_input_offset as u32,
+        index: 0,
       };
 
       print_json(Output {
